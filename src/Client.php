@@ -24,6 +24,7 @@ class Client
 
     /** @var CredentialsCacheInterface */
     protected $credentialsCache;
+    
 
     /**
      * Accepts the account ID, application key and an optional array of options.
