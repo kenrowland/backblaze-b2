@@ -6,7 +6,6 @@ use BackblazeB2\Exceptions\B2Exception;
 use BackblazeB2\Exceptions\NotFoundException;
 use BackblazeB2\Exceptions\ValidationException;
 use BackblazeB2\Http\Client as HttpClient;
-use Carbon\Carbon;
 use GuzzleHttp\Exception\GuzzleException;
 
 class Client
@@ -21,6 +20,10 @@ class Client
     protected $client;
     protected $reAuthTime;
     protected $authTimeoutSeconds;
+    protected $options;
+
+    /** @var CredentialsCacheInterface */
+    protected $credentialsCache;
 
     /**
      * Accepts the account ID, application key and an optional array of options.
@@ -28,26 +31,26 @@ class Client
      * @param $accountId
      * @param $applicationKey
      * @param array $options
-     *
-     * @throws \Exception
+     * @param null $credentialsCache
      */
-    public function __construct($accountId, $applicationKey, array $options = [])
+    public function __construct($accountId, $applicationKey, array $options = [], $credentialsCache = null)
     {
         $this->accountId = $accountId;
         $this->applicationKey = $applicationKey;
-
-        $this->authTimeoutSeconds = 12 * 60 * 60; // 12 hour default
-        if (isset($options['auth_timeout_seconds'])) {
-            $this->authTimeoutSeconds = $options['auth_timeout_seconds'];
-        }
-
-        // set reauthorize time to force an authentication to take place
-        $this->reAuthTime = Carbon::now('UTC')->subSeconds($this->authTimeoutSeconds * 2);
 
         $this->client = new HttpClient(['exceptions' => false]);
         if (isset($options['client'])) {
             $this->client = $options['client'];
         }
+
+        $this->options = $options;
+
+        if (is_null($credentialsCache))
+        {
+            $credentialsCache = new LocalCredentialsCache($this->options);
+        }
+        $this->credentialsCache = $credentialsCache;
+
     }
 
     /**
@@ -243,6 +246,8 @@ class Client
      */
     public function download(array $options)
     {
+        $this->authorizeAccount();
+
         $requestUrl = null;
         $requestOptions = [
             'headers' => [
@@ -262,7 +267,6 @@ class Client
             $requestUrl = sprintf('%s/file/%s/%s', $this->downloadUrl, $options['BucketName'], $options['FileName']);
         }
 
-        $this->authorizeAccount();
 
         $response = $this->client->guzzleRequest('GET', $requestUrl, $requestOptions, false);
 
@@ -300,8 +304,6 @@ class Client
             $nextFileName = $fileName;
             $maxFileCount = 1;
         }
-
-        $this->authorizeAccount();
 
         // B2 returns, at most, 1000 files per "page". Loop through the pages and compile an array of File objects.
         while (true) {
@@ -423,19 +425,30 @@ class Client
      */
     protected function authorizeAccount()
     {
-        if (Carbon::now('UTC')->timestamp < $this->reAuthTime->timestamp) {
-            return;
+
+        $credentials = $this->credentialsCache->get();
+        if ($credentials !== false)
+        {
+            $this->authToken = $credentials['authorizationToken'];
+            $this->apiUrl = $credentials['apiUrl'];
+            $this->downloadUrl = $credentials['downloadUrl'];
         }
+        else
+        {
+            $response = $this->client->guzzleRequest('GET', self::B2_API_BASE_URL . self::B2_API_V1 . '/b2_authorize_account', [
+                'auth' => [$this->accountId, $this->applicationKey],
+            ]);
 
-        $response = $this->client->guzzleRequest('GET', self::B2_API_BASE_URL.self::B2_API_V1.'/b2_authorize_account', [
-            'auth' => [$this->accountId, $this->applicationKey],
-        ]);
+            $this->authToken = $response['authorizationToken'];
+            $this->apiUrl = $response['apiUrl'].self::B2_API_V1;
+            $this->downloadUrl = $response['downloadUrl'];
 
-        $this->authToken = $response['authorizationToken'];
-        $this->apiUrl = $response['apiUrl'].self::B2_API_V1;
-        $this->downloadUrl = $response['downloadUrl'];
-        $this->reAuthTime = Carbon::now('UTC');
-        $this->reAuthTime->addSeconds($this->authTimeoutSeconds);
+            $this->credentialsCache->put([
+                'authorizationToken' => $this->authToken,
+                'apiUrl' => $this->apiUrl,
+                'downloadUrl' => $this->downloadUrl
+            ]);
+        }
     }
 
     /**
@@ -519,8 +532,6 @@ class Client
         if (!isset($options['FileContentType'])) {
             $options['FileContentType'] = 'b2/x-auto';
         }
-
-        $this->authorizeAccount();
 
         // 1) b2_start_large_file, (returns fileId)
         $start = $this->startLargeFile($options['FileName'], $options['FileContentType'], $options['BucketId']);
