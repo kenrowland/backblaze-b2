@@ -12,9 +12,9 @@ class LocalCredentialsCache implements CredentialsCacheInterface
 
     /** @var Carbon $reAuthTime */
     private $reAuthTime;
-    private $authToken;
-    private $apiUrl;
-    private $downloadUrl;
+    private $authToken = null;
+    private $apiUrl = null;
+    private $downloadUrl = null;
     private $authTimeoutSeconds;
 
     public function __construct($options)
@@ -46,7 +46,8 @@ class LocalCredentialsCache implements CredentialsCacheInterface
      */
     public function get()
     {
-        if (Carbon::now('UTC')->timestamp < $this->reAuthTime->timestamp) {
+        if (Carbon::now('UTC')->timestamp > $this->reAuthTime->timestamp) {
+            $this->authToken = $this->apiUrl = $this->downloadUrl = null;
             return false;
         }
 
