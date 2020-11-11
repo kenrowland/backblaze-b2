@@ -15,14 +15,11 @@ class LocalCredentialsCache implements CredentialsCacheInterface
     private $authToken = null;
     private $apiUrl = null;
     private $downloadUrl = null;
-    private $authTimeoutSeconds;
+    private $authTimeoutSeconds = 0;
 
     public function __construct($options)
     {
-        $this->authTimeoutSeconds = 12 * 60 * 60; // 12 hour default
-        if (isset($options['auth_timeout_seconds'])) {
-            $this->authTimeoutSeconds = $options['auth_timeout_seconds'];
-        }
+        $this->authTimeoutSeconds = $options['auth_timeout_seconds'] ?? 12 * 60 * 60; // 12 hour default
 
         // set reauthorize time to force an authentication to take place
         $this->reAuthTime = Carbon::now('UTC')->subSeconds($this->authTimeoutSeconds * 2);
@@ -32,13 +29,12 @@ class LocalCredentialsCache implements CredentialsCacheInterface
     /**
      * @inheritDoc
      */
-    public function put($values)
+    public function put($values, $ttl = null)
     {
         $this->authToken = $values['authorizationToken'];
         $this->apiUrl = $values['apiUrl'];
         $this->downloadUrl = $values['downloadUrl'];
-        $this->reAuthTime = Carbon::now('UTC');
-        $this->reAuthTime->addSeconds($this->authTimeoutSeconds);
+        $this->reAuthTime = Carbon::now('UTC')->addSeconds($ttl ?? $this->authTimeoutSeconds);
     }
 
     /**

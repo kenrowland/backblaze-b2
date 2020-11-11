@@ -10,7 +10,7 @@ interface CredentialsCacheInterface
      * @param $values
      * @return mixed - TRUE if saved, FALSE otherwise
      */
-    public function put($values);
+    public function put($values, $ttl = null);
 
     /**
      * @return mixed - FALSE if nothing stored, credentials otherwise
